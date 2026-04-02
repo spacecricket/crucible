@@ -12,8 +12,9 @@ Crucible is a monorepo deployed on Vercel using [Services](https://vercel.com/do
 ### External Services
 
 - **Neon** — Postgres + pgvector (paper cache, citation graph)
-- **Upstash Redis** — rate limiting (Semantic Scholar API) + job state
-- **Semantic Scholar API** — paper search, metadata, citations
+- **Upstash Redis** — rate limiting + job state
+- **OpenAlex API** — paper search, metadata, citations (primary, free, 10 req/sec)
+- **Semantic Scholar API** — paper search, metadata, citations (secondary, pending API key)
 - **Vercel Queues** — durable async job processing (poll mode)
 
 ## Search Flow
@@ -46,9 +47,9 @@ Browser                          Vercel (Next.js)              Vercel (FastAPI) 
   |                                   |                              |  check Postgres cache   |
   |                                   |                              |  (fresh enough? done)   |
   |                                   |                              |                        |
-  |                                   |                              |  GET Semantic Scholar   |
+  |                                   |                              |  GET OpenAlex API       |
   |                                   |                              |----------------------->|
-  |                                   |                              |  (rate limited: 1/3s)   |
+  |                                   |                              |  (10 req/sec polite)    |
   |                                   |                              |<-----------------------|
   |                                   |                              |                        |
   |                                   |                              |  normalize + upsert     |
@@ -140,9 +141,10 @@ crucible/
 │   ├── migrations/
 │   │   └── 001_create_papers.sql
 │   └── services/
-│       ├── semantic_scholar.py              # S2 API client (rate limited)
+│       ├── openalex.py                      # OpenAlex API client (primary)
+│       ├── semantic_scholar.py              # S2 API client (secondary, rate limited)
 │       ├── paper_search.py                  # Search orchestration
-│       ├── paper_normalizer.py              # S2 response → DB schema
+│       ├── paper_normalizer.py              # API response → DB schema (OpenAlex + S2)
 │       ├── rate_limiter.py                  # Upstash-backed rate limiter
 │       ├── job_store.py                     # Redis-backed job state
 │       └── queue_publisher.py               # Publish to Vercel Queues (REST API)
