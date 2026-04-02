@@ -40,7 +40,10 @@ export async function POST(request: Request) {
       "paper-search",
       CONSUMER_GROUP,
       async (message) => {
-        // Call FastAPI to execute the search
+        // Call FastAPI to execute the search.
+        // Always acknowledge the message — execute_search writes errors
+        // to the job in Redis, so the user sees them via polling.
+        // If we throw here, the queue redelivers and resets the job state.
         const response = await fetch(`${apiUrl}/execute-search`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -53,9 +56,11 @@ export async function POST(request: Request) {
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `FastAPI execute-search failed (${response.status}): ${text}`,
+          console.error(
+            `execute-search failed (${response.status}): ${text}`,
           );
+          // Don't throw — let the message be acknowledged.
+          // The job already has status "error" in Redis.
         }
       },
       { limit: 1 },

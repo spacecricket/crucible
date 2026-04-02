@@ -5,8 +5,8 @@ Neon Postgres connection utilities.
 import os
 import json
 from contextlib import contextmanager
+from datetime import datetime, date
 
-import sqlalchemy
 from sqlalchemy import create_engine, text
 
 
@@ -89,4 +89,15 @@ def search_cached_papers(query: str, limit: int = 20) -> list[dict]:
             """),
             {"query": query, "limit": limit},
         )
-        return [dict(row._mapping) for row in result]
+        return [_serialize_row(row._mapping) for row in result]
+
+
+def _serialize_row(mapping) -> dict:
+    """Convert a SQLAlchemy row mapping to a JSON-safe dict."""
+    result = {}
+    for key, value in dict(mapping).items():
+        if isinstance(value, (datetime, date)):
+            result[key] = value.isoformat()
+        else:
+            result[key] = value
+    return result

@@ -1,7 +1,11 @@
+import asyncio
+import logging
 import httpx
 from upstash_ratelimit import Ratelimit
 
 from backend.services.rate_limiter import wait_for_rate_limit
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.semanticscholar.org/graph/v1"
 
@@ -31,19 +35,37 @@ class SemanticScholarClient:
             timeout=30.0,
         )
 
-    async def _request(self, method: str, path: str, **kwargs) -> dict:
-        """Make a rate-limited request to the S2 API."""
-        await wait_for_rate_limit(self.rate_limiter)
+    async def _request(self, method: str, path: str, max_retries: int = 3, **kwargs) -> dict:
+        """Make a rate-limited request to the S2 API with retry on 429."""
+        for attempt in range(max_retries + 1):
+            await wait_for_rate_limit(self.rate_limiter)
 
-        resp = await self.client.request(method, path, **kwargs)
-
-        # Safety net: if we still get rate limited, back off and retry once
-        if resp.status_code == 429:
-            retry_after = int(resp.headers.get("Retry-After", 5))
-            import asyncio
-            await asyncio.sleep(retry_after)
             resp = await self.client.request(method, path, **kwargs)
 
+            if resp.status_code == 429:
+                logger.warning(
+                    "S2 rate limited (429) on attempt %d/%d. "
+                    "URL: %s %s | Status: %s | Headers: %s | Body: %s",
+                    attempt + 1,
+                    max_retries + 1,
+                    method,
+                    path,
+                    resp.status_code,
+                    dict(resp.headers),
+                    resp.text[:500],
+                )
+                if attempt == max_retries:
+                    resp.raise_for_status()
+                # Respect Retry-After header, or back off exponentially
+                retry_after = int(resp.headers.get("Retry-After", 2 ** (attempt + 1)))
+                logger.info("Waiting %d seconds before retry", retry_after)
+                await asyncio.sleep(retry_after)
+                continue
+
+            resp.raise_for_status()
+            return resp.json()
+
+        # Should not reach here, but just in case
         resp.raise_for_status()
         return resp.json()
 

@@ -10,4 +10,9 @@ dependencies = [
   "sqlalchemy>=2.0.0",
   "upstash-ratelimit>=1.1.0",
   "upstash-redis>=1.0.0",
+  "python-dotenv>=1.0.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["backend*", "services*"]
+exclude = ["public*", "migrations*"]

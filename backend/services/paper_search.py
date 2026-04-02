@@ -4,18 +4,18 @@ Paper search orchestration.
 Flow:
 1. Check Postgres cache for matching papers
 2. If cache has enough fresh results (< 24h old), return them directly
-3. Otherwise call Semantic Scholar API for fresh results
+3. Otherwise call OpenAlex API for fresh results
 4. Normalize, cache, and merge
 """
 
 from datetime import datetime, timezone, timedelta
 
-from backend.services.semantic_scholar import SemanticScholarClient
+from backend.services.openalex import OpenAlexClient
 from backend.services.paper_normalizer import normalize_paper
 from backend.services.job_store import JobStore
 from backend.db import upsert_papers, search_cached_papers
 
-# Skip S2 API call if cached results are newer than this
+# Skip API call if cached results are newer than this
 CACHE_FRESHNESS_THRESHOLD = timedelta(hours=24)
 
 
@@ -39,11 +39,11 @@ async def execute_search(
     query: str,
     limit: int,
     job_id: str,
-    s2_client: SemanticScholarClient,
+    client: OpenAlexClient,
     job_store: JobStore,
 ):
     """
-    Run a paper search: check cache, call S2 if needed, merge results, update job.
+    Run a paper search: check cache, call OpenAlex if needed, merge results, update job.
     """
     try:
         job_store.update_job(job_id, status="searching_cache")
@@ -62,7 +62,7 @@ async def execute_search(
             )
             return
 
-        # Step 3: Cache miss or stale — fetch from Semantic Scholar
+        # Step 3: Cache miss or stale — fetch from OpenAlex
         if cached:
             job_store.update_job(
                 job_id,
@@ -71,12 +71,12 @@ async def execute_search(
                 total=len(cached),
             )
 
-        s2_response = await s2_client.search_papers(query, limit=limit)
-        raw_papers = s2_response.get("data") or []
+        response = await client.search_works(query, limit=limit)
+        raw_works = response.get("results") or []
 
         # Step 4: Normalize and deduplicate against cache
         new_papers = []
-        for raw in raw_papers:
+        for raw in raw_works:
             normalized = normalize_paper(raw)
             if normalized and normalized["s2_id"] not in cached_ids:
                 new_papers.append(normalized)

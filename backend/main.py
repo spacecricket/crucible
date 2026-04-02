@@ -1,13 +1,15 @@
 import os
 import time
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from upstash_redis import Redis
 
-from backend.services.rate_limiter import create_rate_limiter
-from backend.services.semantic_scholar import SemanticScholarClient
+from backend.services.openalex import OpenAlexClient
 from backend.services.job_store import JobStore
 from backend.services.paper_search import execute_search
 from backend.services.queue_publisher import QueuePublisher
@@ -15,7 +17,7 @@ from backend.services.queue_publisher import QueuePublisher
 
 # --- App state initialized at startup ---
 
-s2_client: SemanticScholarClient | None = None
+openalex_client: OpenAlexClient | None = None
 job_store: JobStore | None = None
 queue: QueuePublisher | None = None
 
@@ -24,23 +26,22 @@ JOB_TIMEOUT_SECONDS = 120
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global s2_client, job_store, queue
+    global openalex_client, job_store, queue
 
     # Startup
     redis = Redis(
         url=os.environ["UPSTASH_REDIS_REST_URL"],
         token=os.environ["UPSTASH_REDIS_REST_TOKEN"],
     )
-    rate_limiter = create_rate_limiter()
-    s2_client = SemanticScholarClient(rate_limiter)
+    openalex_client = OpenAlexClient()
     job_store = JobStore(redis)
     queue = QueuePublisher()
 
     yield
 
     # Shutdown
-    if s2_client:
-        await s2_client.close()
+    if openalex_client:
+        await openalex_client.close()
 
 
 app = FastAPI(
@@ -77,7 +78,7 @@ async def start_search(q: str, limit: int = 20):
             import httpx
             async with httpx.AsyncClient() as client:
                 await client.post(
-                    f"{web_url}/api/process-queue",
+                    f"{web_url}/internal/process-queue",
                     headers={"x-internal-trigger": "true"},
                     timeout=1.0,  # don't block the response on this
                 )
@@ -97,13 +98,13 @@ class ExecuteSearchRequest(BaseModel):
 async def execute_search_endpoint(req: ExecuteSearchRequest):
     """
     Internal endpoint called by the Vercel Queue consumer.
-    Runs the actual S2 search, caches results, updates the job.
+    Runs the search, caches results, updates the job.
     """
     await execute_search(
         query=req.query,
         limit=req.limit,
         job_id=req.job_id,
-        s2_client=s2_client,
+        client=openalex_client,
         job_store=job_store,
     )
 

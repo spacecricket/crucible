@@ -8,5 +8,11 @@
       "entrypoint": "backend/main.py",
       "routePrefix": "/api"
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/internal/process-queue",
+      "schedule": "* * * * *"
+    }
+  ]
 }
