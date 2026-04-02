@@ -1,36 +1,150 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Crucible
 
-## Getting Started
+Evaluate scientific rigor by tracing claims through citation graphs and scoring the strength of evidence.
 
-First, run the development server:
+## Architecture
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Crucible is a monorepo deployed on Vercel using [Services](https://vercel.com/docs/services):
+
+- **Next.js frontend** at `/` — search UI, graph visualization
+- **FastAPI backend** at `/api` — paper search, S2 client, rigor scoring
+
+### External Services
+
+- **Neon** — Postgres + pgvector (paper cache, citation graph)
+- **Upstash Redis** — rate limiting (Semantic Scholar API) + job state
+- **Semantic Scholar API** — paper search, metadata, citations
+- **Vercel Queues** — durable async job processing (poll mode)
+
+## Search Flow
+
+### User-initiated search
+
+```
+Browser                          Vercel (Next.js)              Vercel (FastAPI)            External
+  |                                   |                              |                        |
+  |  POST /api/papers/search?q=...    |                              |                        |
+  |---------------------------------->|----------------------------->|                        |
+  |                                   |                              |                        |
+  |                                   |              create job in Redis (status: pending)     |
+  |                                   |                              |                        |
+  |                                   |              publish message to Vercel Queue           |
+  |                                   |                              |----> [Queue: paper-search]
+  |                                   |                              |                        |
+  |                                   |    fire-and-forget POST /api/process-queue             |
+  |                                   |<-----------------------------|                        |
+  |                                   |                              |                        |
+  |         { job_id: "abc123" }      |                              |                        |
+  |<----------------------------------|<-----------------------------|                        |
+  |                                   |                              |                        |
+  |                                   |  /api/process-queue          |                        |
+  |                                   |  (poll consumer picks up     |                        |
+  |                                   |   message from queue)        |                        |
+  |                                   |         POST /api/execute-search                      |
+  |                                   |----------------------------->|                        |
+  |                                   |                              |                        |
+  |                                   |                              |  check Postgres cache   |
+  |                                   |                              |  (fresh enough? done)   |
+  |                                   |                              |                        |
+  |                                   |                              |  GET Semantic Scholar   |
+  |                                   |                              |----------------------->|
+  |                                   |                              |  (rate limited: 1/3s)   |
+  |                                   |                              |<-----------------------|
+  |                                   |                              |                        |
+  |                                   |                              |  normalize + upsert     |
+  |                                   |                              |  into Postgres cache    |
+  |                                   |                              |                        |
+  |                                   |                              |  update job in Redis    |
+  |                                   |                              |  (status: complete)     |
+  |                                   |                              |                        |
+  |  GET /api/papers/search/abc123    |                              |                        |
+  |  (polling)                        |                              |                        |
+  |---------------------------------->|----------------------------->|                        |
+  |                                   |                              |  read job from Redis    |
+  |  { status: "complete",            |                              |                        |
+  |    papers: [...] }                |                              |                        |
+  |<----------------------------------|<-----------------------------|                        |
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Cron-initiated processing (safety net)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+Cron (every 1 min)               Vercel (Next.js)              Vercel (FastAPI)
+  |                                   |                              |
+  |  POST /api/process-queue          |                              |
+  |---------------------------------->|                              |
+  |                                   |                              |
+  |                                   |  poll Queue for message      |
+  |                                   |----> [Queue: paper-search]   |
+  |                                   |                              |
+  |                                   |  (if message found)          |
+  |                                   |  POST /api/execute-search    |
+  |                                   |----------------------------->|
+  |                                   |                              |
+  |                                   |                              |  (same flow as above:
+  |                                   |                              |   cache check, S2 call,
+  |                                   |                              |   normalize, upsert,
+  |                                   |                              |   update job in Redis)
+  |                                   |                              |
+  |                                   |  loop until queue empty      |
+  |                                   |  (max 10 per invocation)     |
+  |                                   |                              |
+  |  { processed: N }                 |                              |
+  |<----------------------------------|                              |
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The cron ensures no messages are stuck in the queue if the fire-and-forget trigger from the search endpoint fails.
 
-## Learn More
+## Job Statuses
 
-To learn more about Next.js, take a look at the following resources:
+| Status | Meaning |
+|--------|---------|
+| `pending` | Job created, message published to queue, waiting for consumer |
+| `searching_cache` | Consumer picked up job, checking Postgres for cached papers |
+| `searching_api` | Cache miss or stale, calling Semantic Scholar API |
+| `complete` | Search finished, `papers` and `total` populated |
+| `error` | Failed or timed out (2 min threshold), `error` has details |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Local Development
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+# Frontend
+pnpm dev
 
-## Deploy on Vercel
+# Backend
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# Pull env vars (Neon, Upstash, OIDC)
+vercel link && vercel env pull .env.local
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Project Structure
+
+```
+crucible/
+├── src/
+│   ├── app/
+│   │   ├── page.tsx                         # Landing page
+│   │   └── api/
+│   │       └── process-queue/
+│   │           └── route.ts                 # Poll-mode queue consumer
+│   └── lib/
+│       └── queue.ts                         # PollingQueueClient setup
+├── backend/
+│   ├── main.py                              # FastAPI app
+│   ├── db.py                                # Neon Postgres connection + queries
+│   ├── migrations/
+│   │   └── 001_create_papers.sql
+│   └── services/
+│       ├── semantic_scholar.py              # S2 API client (rate limited)
+│       ├── paper_search.py                  # Search orchestration
+│       ├── paper_normalizer.py              # S2 response → DB schema
+│       ├── rate_limiter.py                  # Upstash-backed rate limiter
+│       ├── job_store.py                     # Redis-backed job state
+│       └── queue_publisher.py               # Publish to Vercel Queues (REST API)
+└── vercel.json                              # Services config
+```
