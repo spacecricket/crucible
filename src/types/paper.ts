@@ -25,3 +25,28 @@ export interface SearchJob {
   error: string | null;
   started_at: number;
 }
+
+export interface CitationEdge {
+  source_id: string;
+  target_id: string;
+  hop: number;
+}
+
+export interface CitationGraph {
+  nodes: Paper[];
+  edges: CitationEdge[];
+}
+
+export interface GraphJob {
+  status:
+    | "pending"
+    | "building_graph"
+    | "expanding_hop_0"
+    | "expanding_hop_1"
+    | "complete"
+    | "error";
+  query: string;
+  graph?: CitationGraph;
+  error: string | null;
+  started_at: number;
+}

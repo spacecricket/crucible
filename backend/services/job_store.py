@@ -3,13 +3,21 @@ Job state management backed by Upstash Redis.
 
 Jobs track async search operations so the frontend can poll for progress.
 
-Job statuses:
+Job statuses (search):
     "pending"         - Job created, message published to queue, waiting for consumer pickup.
     "searching_cache" - Consumer picked up the job, checking Postgres cache for existing papers.
-    "searching_api"   - Cache checked, now calling Semantic Scholar API for fresh results.
+    "searching_api"   - Cache checked, now calling OpenAlex API for fresh results.
     "complete"        - Search finished successfully. `papers` and `total` are populated.
     "error"           - Something went wrong. `error` contains a human-readable message.
                         Also set by the polling endpoint if a job exceeds the timeout threshold.
+
+Job statuses (citation graph):
+    "pending"          - Job created, message published to queue, waiting for consumer pickup.
+    "building_graph"   - Consumer picked up the job, starting graph construction.
+    "expanding_hop_0"  - Fetching direct references and citations of the seed paper.
+    "expanding_hop_1"  - Fetching references and citations of hop-0 neighbors.
+    "complete"         - Graph built. `graph` has {nodes: [...], edges: [...]}.
+    "error"            - Something went wrong. `error` contains a human-readable message.
 """
 
 import json

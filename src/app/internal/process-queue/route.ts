@@ -6,11 +6,16 @@ interface PaperSearchMessage {
   limit: number;
 }
 
+interface CitationGraphMessage {
+  job_id: string;
+  paper_id: string;
+  max_hops: number;
+}
+
 const queue = new PollingQueueClient({
   region: process.env.VERCEL_REGION ?? "iad1",
 });
 
-const CONSUMER_GROUP = "paper-search-worker";
 const MAX_MESSAGES_PER_INVOCATION = 10;
 
 export async function POST(request: Request) {
@@ -35,15 +40,13 @@ export async function POST(request: Request) {
 
   let processed = 0;
 
+  // --- Drain paper-search queue ---
   for (let i = 0; i < MAX_MESSAGES_PER_INVOCATION; i++) {
     const result = await queue.receive<PaperSearchMessage>(
       "paper-search",
-      CONSUMER_GROUP,
+      "paper-search-worker",
       async (message) => {
-        // Call FastAPI to execute the search.
-        // Always acknowledge the message — execute_search writes errors
-        // to the job in Redis, so the user sees them via polling.
-        // If we throw here, the queue redelivers and resets the job state.
+        // Always acknowledge — execute_search writes errors to Redis.
         const response = await fetch(`${apiUrl}/execute-search`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -59,18 +62,43 @@ export async function POST(request: Request) {
           console.error(
             `execute-search failed (${response.status}): ${text}`,
           );
-          // Don't throw — let the message be acknowledged.
-          // The job already has status "error" in Redis.
         }
       },
       { limit: 1 },
     );
 
-    if (!result.ok) {
-      // Queue is empty — stop polling
-      break;
-    }
+    if (!result.ok) break;
+    processed++;
+  }
 
+  // --- Drain citation-graph queue ---
+  for (let i = 0; i < MAX_MESSAGES_PER_INVOCATION; i++) {
+    const result = await queue.receive<CitationGraphMessage>(
+      "citation-graph",
+      "citation-graph-worker",
+      async (message) => {
+        // Always acknowledge — build_citation_graph writes errors to Redis.
+        const response = await fetch(`${apiUrl}/execute-graph`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            job_id: message.job_id,
+            paper_id: message.paper_id,
+            max_hops: message.max_hops,
+          }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          console.error(
+            `execute-graph failed (${response.status}): ${text}`,
+          );
+        }
+      },
+      { limit: 1 },
+    );
+
+    if (!result.ok) break;
     processed++;
   }
 

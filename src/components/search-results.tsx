@@ -3,11 +3,20 @@
 import { PaperCard } from "@/components/paper-card";
 import type { SearchJob } from "@/types/paper";
 
+interface TakeawayState {
+  takeaways: string[];
+  loading: boolean;
+}
+
+interface TakeawaysMap {
+  [paperId: string]: TakeawayState;
+}
+
 function StatusMessage({ status }: { status: string }) {
   const messages: Record<string, string> = {
     pending: "Queued...",
     searching_cache: "Checking cached papers...",
-    searching_api: "Searching Semantic Scholar...",
+    searching_api: "Searching OpenAlex...",
   };
 
   return (
@@ -20,7 +29,13 @@ function StatusMessage({ status }: { status: string }) {
   );
 }
 
-export function SearchResults({ job }: { job: SearchJob }) {
+export function SearchResults({
+  job,
+  takeaways,
+}: {
+  job: SearchJob;
+  takeaways?: TakeawaysMap;
+}) {
   if (job.status === "error") {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950">
@@ -44,7 +59,12 @@ export function SearchResults({ job }: { job: SearchJob }) {
             {isLoading ? " so far" : ""}
           </p>
           {job.papers.map((paper) => (
-            <PaperCard key={paper.s2_id} paper={paper} />
+            <PaperCard
+              key={paper.s2_id}
+              paper={paper}
+              query={job.query}
+              takeaway={takeaways?.[paper.s2_id]}
+            />
           ))}
         </div>
       )}

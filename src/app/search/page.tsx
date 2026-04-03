@@ -5,11 +5,13 @@ import { useEffect, useRef, Suspense } from "react";
 import { SearchBar } from "@/components/search-bar";
 import { SearchResults } from "@/components/search-results";
 import { useSearch } from "@/hooks/use-search";
+import { useTakeaways } from "@/hooks/use-takeaways";
 
 function SearchPageContent() {
   const searchParams = useSearchParams();
   const query = searchParams.get("q") ?? "";
   const { job, isLoading, search } = useSearch();
+  const { takeaways, fetchTakeaways, stop: stopTakeaways } = useTakeaways();
   const lastQuery = useRef("");
 
   useEffect(() => {
@@ -18,6 +20,14 @@ function SearchPageContent() {
       search(query);
     }
   }, [query, search]);
+
+  // When search completes, trigger takeaways generation
+  useEffect(() => {
+    if (job?.status === "complete" && job.papers.length > 0 && job.query) {
+      fetchTakeaways(job.query, job.papers);
+    }
+    return () => stopTakeaways();
+  }, [job?.status, job?.papers, job?.query, fetchTakeaways, stopTakeaways]);
 
   function handleSearch(newQuery: string) {
     // Update URL without full navigation
@@ -37,11 +47,21 @@ function SearchPageContent() {
           Crucible
         </a>
         <div className="flex-1">
-          <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+          <SearchBar
+            onSearch={handleSearch}
+            isLoading={isLoading}
+            initialQuery={query}
+          />
         </div>
       </div>
 
-      {job && <SearchResults job={job} />}
+      {query && (
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          Results for &ldquo;{query}&rdquo;
+        </p>
+      )}
+
+      {job && <SearchResults job={job} takeaways={takeaways} />}
     </div>
   );
 }

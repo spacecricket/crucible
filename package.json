@@ -9,10 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.66",
+    "@ai-sdk/gateway": "^3.0.87",
+    "@vercel/oidc": "^3.2.0",
     "@vercel/queue": "^0.1.5",
+    "@xyflow/react": "^12.10.2",
+    "ai": "^6.0.145",
     "next": "16.2.1",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

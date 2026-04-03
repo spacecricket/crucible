@@ -1,4 +1,68 @@
+import Link from "next/link";
 import type { Paper } from "@/types/paper";
+
+interface TakeawayState {
+  takeaways: string[];
+  loading: boolean;
+}
+
+function TakeawaysBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:bg-violet-950 dark:text-violet-400">
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 16 16"
+        fill="none"
+        className="opacity-70"
+      >
+        <path
+          d="M8 1.5a4.5 4.5 0 0 0-1.5 8.74V12a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1.76A4.5 4.5 0 0 0 8 1.5Z"
+          stroke="currentColor"
+          strokeWidth="1.2"
+        />
+        <path d="M6.5 14h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      </svg>
+      AI takeaways
+    </span>
+  );
+}
+
+function TakeawaysLoading() {
+  return (
+    <div className="mt-3 flex items-center gap-2 rounded-md bg-zinc-50 px-3 py-2 dark:bg-zinc-900">
+      <div className="h-3 w-3 animate-spin rounded-full border border-zinc-300 border-t-violet-500 dark:border-zinc-600 dark:border-t-violet-400" />
+      <span className="text-xs text-zinc-400 dark:text-zinc-500">
+        Generating takeaways…
+      </span>
+    </div>
+  );
+}
+
+function TakeawaysList({ takeaways }: { takeaways: string[] }) {
+  if (takeaways.length === 0) return null;
+
+  return (
+    <div className="mt-3 rounded-md border border-violet-100 bg-violet-50/50 px-3 py-2.5 dark:border-violet-900/50 dark:bg-violet-950/30">
+      <div className="mb-1.5">
+        <TakeawaysBadge />
+      </div>
+      <ul className="space-y-1">
+        {takeaways.map((t, i) => (
+          <li
+            key={i}
+            className="flex gap-2 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300"
+          >
+            <span className="mt-0.5 shrink-0 text-violet-400 dark:text-violet-500">
+              •
+            </span>
+            <span>{t}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function PublicationType({ type }: { type: string }) {
   const colors: Record<string, string> = {
@@ -17,7 +81,15 @@ function PublicationType({ type }: { type: string }) {
   );
 }
 
-export function PaperCard({ paper }: { paper: Paper }) {
+export function PaperCard({
+  paper,
+  query,
+  takeaway,
+}: {
+  paper: Paper;
+  query?: string;
+  takeaway?: TakeawayState;
+}) {
   const authorList = paper.authors?.slice(0, 3).map((a) => a.name).join(", ");
   const hasMore = (paper.authors?.length ?? 0) > 3;
 
@@ -40,18 +112,12 @@ export function PaperCard({ paper }: { paper: Paper }) {
       </div>
 
       <h3 className="mb-1 text-base font-semibold leading-snug text-zinc-900 dark:text-zinc-100">
-        {paper.pdf_url ? (
-          <a
-            href={paper.pdf_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:underline"
-          >
-            {paper.title}
-          </a>
-        ) : (
-          paper.title
-        )}
+        <Link
+          href={`/paper/${paper.s2_id}${query ? `?q=${encodeURIComponent(query)}` : ""}`}
+          className="hover:underline"
+        >
+          {paper.title}
+        </Link>
       </h3>
 
       {authorList && (
@@ -71,6 +137,12 @@ export function PaperCard({ paper }: { paper: Paper }) {
         <p className="mb-3 line-clamp-3 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
           {paper.abstract}
         </p>
+      )}
+
+      {/* Takeaways */}
+      {takeaway?.loading && <TakeawaysLoading />}
+      {takeaway && !takeaway.loading && takeaway.takeaways.length > 0 && (
+        <TakeawaysList takeaways={takeaway.takeaways} />
       )}
 
       <div className="flex flex-wrap gap-4 text-xs text-zinc-500 dark:text-zinc-400">

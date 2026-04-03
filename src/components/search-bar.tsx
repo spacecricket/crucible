@@ -7,6 +7,7 @@ interface SearchBarProps {
   isLoading: boolean;
   placeholder?: string;
   size?: "lg" | "md";
+  initialQuery?: string;
 }
 
 export function SearchBar({
@@ -14,8 +15,9 @@ export function SearchBar({
   isLoading,
   placeholder = "Is high LDL bad for the heart?",
   size = "md",
+  initialQuery = "",
 }: SearchBarProps) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
