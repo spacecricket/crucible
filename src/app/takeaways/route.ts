@@ -33,7 +33,6 @@ function getModel(): { model: LanguageModel; name: string } {
 const TakeawaySchema = z.object({
   takeaways: z
     .array(z.string())
-    .max(3)
     .describe("2-3 key takeaways from this paper relevant to the query"),
 });
 
