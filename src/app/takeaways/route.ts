@@ -1,5 +1,4 @@
 import { generateText, Output, type LanguageModel } from "ai";
-import { gateway } from "@ai-sdk/gateway";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod/v4";
 
@@ -26,8 +25,8 @@ import { z } from "zod/v4";
  */
 function getModel(): { model: LanguageModel; name: string } {
   return {
-    model: gateway("openai/gpt-5-nano"),
-    name: "openai/gpt-5-nano (gateway)",
+    model: anthropic("claude-3-5-haiku-20241022"),
+    name: "anthropic/claude-3-5-haiku-20241022",
   };
 }
 

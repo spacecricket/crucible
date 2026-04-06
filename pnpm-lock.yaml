@@ -14,12 +14,6 @@ importers:
       '@ai-sdk/gateway':
         specifier: ^3.0.87
         version: 3.0.87(zod@4.3.6)
-      '@vercel/oidc':
-        specifier: ^3.2.0
-        version: 3.2.0
-      '@vercel/queue':
-        specifier: ^0.1.5
-        version: 0.1.5
       '@xyflow/react':
         specifier: ^12.10.2
         version: 12.10.2(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -779,14 +773,6 @@ packages:
   '@vercel/oidc@3.1.0':
     resolution: {integrity: sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w==}
     engines: {node: '>= 20'}
-
-  '@vercel/oidc@3.2.0':
-    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
-    engines: {node: '>= 20'}
-
-  '@vercel/queue@0.1.5':
-    resolution: {integrity: sha512-YYE/QJe4CREBXpq8cFkPhm71u5d/QzNtWjWcGmlBwlYBjwFq4OhHiGz1YqUdSfyX9IIpB6+zY9ZDpNxO4GFhjA==}
-    engines: {node: '>=20.0.0'}
 
   '@xyflow/react@12.10.2':
     resolution: {integrity: sha512-CgIi6HwlcHXwlkTpr0fxLv/0sRVNZ8IdwKLzzeCscaYBwpvfcH1QFOCeaTCuEn1FQEs/B8CjnTSjhs8udgmBgQ==}
@@ -1663,10 +1649,6 @@ packages:
 
   minimist@1.2.8:
     resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
-
-  mixpart@0.0.5:
-    resolution: {integrity: sha512-TpWi9/2UIr7VWCVAM7NB4WR4yOglAetBkuKfxs3K0vFcUukqAaW1xsgX0v1gNGiDKzYhPHFcHgarC7jmnaOy4w==}
-    engines: {node: '>=20.0.0'}
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
@@ -2765,15 +2747,6 @@ snapshots:
 
   '@vercel/oidc@3.1.0': {}
 
-  '@vercel/oidc@3.2.0': {}
-
-  '@vercel/queue@0.1.5':
-    dependencies:
-      '@vercel/oidc': 3.2.0
-      minimatch: 10.2.5
-      mixpart: 0.0.5
-      picocolors: 1.1.1
-
   '@xyflow/react@12.10.2(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@xyflow/system': 0.0.76
@@ -3805,8 +3778,6 @@ snapshots:
       brace-expansion: 1.1.13
 
   minimist@1.2.8: {}
-
-  mixpart@0.0.5: {}
 
   ms@2.1.3: {}
 

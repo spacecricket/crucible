@@ -1,0 +1,21 @@
+app = "crucible-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+  # Build context is the repo root so the COPY backend/ path resolves
+  build_target = ""
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1        # keep 1 alive so the worker is always running
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

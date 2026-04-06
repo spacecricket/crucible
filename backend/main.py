@@ -1,6 +1,10 @@
+import asyncio
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Union
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,38 +17,103 @@ from backend.services.semantic_scholar import SemanticScholarClient
 from backend.services.job_store import JobStore
 from backend.services.paper_search import execute_search
 from backend.services.graph_builder import build_citation_graph
-from backend.services.queue_publisher import QueuePublisher
 from backend.services.rate_limiter import create_rate_limiter
 from backend.db import get_paper_by_id, get_citation_graph, get_cached_takeaways, upsert_takeaway
 
+logger = logging.getLogger(__name__)
 
-# --- App state initialized at startup ---
+# ─── In-process work queue ────────────────────────────────────────
+#
+# On Fly.io we run a persistent process, so we don't need an external
+# queue service. Jobs are enqueued in-memory and drained by a single
+# background asyncio task, which naturally serializes S2 API calls
+# and respects the rate limiter.
+#
+# If the process restarts mid-job, the job stays in Redis as
+# "pending/searching_*" and times out on the next poll — the user
+# can retry. Good enough for a side project.
+
+@dataclass
+class PaperSearchWork:
+    job_id: str
+    query: str
+    limit: int
+
+
+@dataclass
+class GraphBuildWork:
+    job_id: str
+    paper_id: str
+    max_hops: int
+
+
+WorkItem = Union[PaperSearchWork, GraphBuildWork]
+
+_work_queue: asyncio.Queue[WorkItem] = asyncio.Queue()
+
+
+async def _worker(client: SemanticScholarClient, jobs: JobStore):
+    """
+    Background worker — runs for the lifetime of the process.
+    Drains _work_queue one item at a time, so S2 rate limiting is
+    respected without any external coordination.
+    """
+    logger.info("Worker started")
+    while True:
+        item = await _work_queue.get()
+        try:
+            if isinstance(item, PaperSearchWork):
+                await execute_search(
+                    query=item.query,
+                    limit=item.limit,
+                    job_id=item.job_id,
+                    client=client,
+                    job_store=jobs,
+                )
+            elif isinstance(item, GraphBuildWork):
+                await build_citation_graph(
+                    paper_id=item.paper_id,
+                    job_id=item.job_id,
+                    client=client,
+                    job_store=jobs,
+                    max_hops=item.max_hops,
+                )
+        except Exception:
+            logger.exception("Worker error processing %s", item)
+        finally:
+            _work_queue.task_done()
+
+
+# ─── App state ───────────────────────────────────────────────────
 
 s2_client: SemanticScholarClient | None = None
 job_store: JobStore | None = None
-queue: QueuePublisher | None = None
-
 JOB_TIMEOUT_SECONDS = 120
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global s2_client, job_store, queue
+    global s2_client, job_store
 
-    # Startup
     redis = Redis(
         url=os.environ["UPSTASH_REDIS_REST_URL"],
         token=os.environ["UPSTASH_REDIS_REST_TOKEN"],
     )
     s2_client = SemanticScholarClient(rate_limiter=create_rate_limiter())
     job_store = JobStore(redis)
-    queue = QueuePublisher()
+
+    # Start the background worker
+    worker_task = asyncio.create_task(_worker(s2_client, job_store))
 
     yield
 
-    # Shutdown
-    if s2_client:
-        await s2_client.close()
+    # Shutdown: cancel worker and close S2 client
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+    await s2_client.close()
 
 
 app = FastAPI(
@@ -56,62 +125,19 @@ app = FastAPI(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "queue_depth": _work_queue.qsize()}
 
+
+# ─── Paper search ─────────────────────────────────────────────────
 
 @app.post("/papers/search")
 async def start_search(q: str, limit: int = 20):
     """
-    Start a paper search. Returns a job ID to poll for results.
-    Publishes to Vercel Queue, then triggers the poll consumer immediately.
+    Start a paper search. Creates a job, enqueues work, returns job_id immediately.
     """
     job_id = job_store.create_job(q)
-
-    await queue.publish("paper-search", {
-        "job_id": job_id,
-        "query": q,
-        "limit": limit,
-    })
-
-    # Trigger the poll consumer immediately so the user doesn't wait for cron.
-    # Fire-and-forget — if this fails, the cron will pick it up within 1 minute.
-    web_url = os.environ.get("WEB_URL", "")
-    if web_url:
-        try:
-            import httpx
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    f"{web_url}/internal/process-queue",
-                    headers={"x-internal-trigger": "true"},
-                    timeout=1.0,  # don't block the response on this
-                )
-        except Exception:
-            pass  # cron will handle it
-
+    await _work_queue.put(PaperSearchWork(job_id=job_id, query=q, limit=limit))
     return {"job_id": job_id}
-
-
-class ExecuteSearchRequest(BaseModel):
-    job_id: str
-    query: str
-    limit: int = 20
-
-
-@app.post("/execute-search")
-async def execute_search_endpoint(req: ExecuteSearchRequest):
-    """
-    Internal endpoint called by the Vercel Queue consumer.
-    Runs the search, caches results, updates the job.
-    """
-    await execute_search(
-        query=req.query,
-        limit=req.limit,
-        job_id=req.job_id,
-        client=s2_client,
-        job_store=job_store,
-    )
-
-    return {"status": "ok"}
 
 
 @app.get("/papers/search/{job_id}")
@@ -124,7 +150,6 @@ async def get_search_results(job_id: str):
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found or expired")
 
-    # Detect stuck jobs
     if job["status"] not in ("complete", "error"):
         started_at = job.get("started_at")
         if started_at and (time.time() - started_at) > JOB_TIMEOUT_SECONDS:
@@ -137,16 +162,15 @@ async def get_search_results(job_id: str):
     return job
 
 
-# ─── Paper detail ────────────────────────────────────────────────
+# ─── Paper detail ─────────────────────────────────────────────────
 
 @app.get("/papers/{paper_id}")
 async def get_paper(paper_id: str):
-    """Get a single paper by ID. Fetches from OpenAlex if not cached."""
+    """Get a single paper by ID. Fetches from Semantic Scholar if not cached."""
     paper = get_paper_by_id(paper_id)
     if paper:
         return paper
 
-    # Not cached — try fetching from Semantic Scholar
     try:
         from backend.services.paper_normalizer import normalize_paper
         from backend.db import upsert_papers
@@ -171,50 +195,12 @@ async def start_graph_build(paper_id: str, max_hops: int = 2):
     Returns a job ID to poll for results.
     """
     job_id = job_store.create_job(f"graph:{paper_id}")
-
-    await queue.publish("citation-graph", {
-        "job_id": job_id,
-        "paper_id": paper_id,
-        "max_hops": min(max_hops, 2),
-    })
-
-    # Fire-and-forget trigger for the poll consumer
-    web_url = os.environ.get("WEB_URL", "")
-    if web_url:
-        try:
-            import httpx
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    f"{web_url}/internal/process-queue",
-                    headers={"x-internal-trigger": "true"},
-                    timeout=1.0,
-                )
-        except Exception:
-            pass
-
+    await _work_queue.put(GraphBuildWork(
+        job_id=job_id,
+        paper_id=paper_id,
+        max_hops=min(max_hops, 2),
+    ))
     return {"job_id": job_id}
-
-
-class BuildGraphRequest(BaseModel):
-    job_id: str
-    paper_id: str
-    max_hops: int = 2
-
-
-@app.post("/execute-graph")
-async def execute_graph_endpoint(req: BuildGraphRequest):
-    """
-    Internal endpoint called by the Vercel Queue consumer.
-    Builds the citation graph, caches results, updates the job.
-    """
-    await build_citation_graph(
-        paper_id=req.paper_id,
-        job_id=req.job_id,
-        client=s2_client,
-        job_store=job_store,
-        max_hops=req.max_hops,
-    )
-    return {"status": "ok"}
 
 
 @app.get("/papers/{paper_id}/graph")
@@ -238,10 +224,6 @@ class TakeawaysLookupRequest(BaseModel):
 
 @app.post("/takeaways/lookup")
 async def lookup_takeaways(req: TakeawaysLookupRequest):
-    """
-    Batch lookup cached takeaways for papers + query.
-    Returns {paper_id: [bullet, ...]} for papers that have cached takeaways.
-    """
     cached = get_cached_takeaways(req.query, req.paper_ids)
     return cached
 
@@ -255,11 +237,10 @@ class TakeawaysStoreRequest(BaseModel):
 
 @app.post("/takeaways/store")
 async def store_takeaway(req: TakeawaysStoreRequest):
-    """Store a single paper's takeaways in the cache."""
     upsert_takeaway(req.paper_id, req.query, req.bullets, req.model)
     return {"status": "ok"}
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=5001, reload=True)
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8080, reload=True)
