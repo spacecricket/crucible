@@ -12,8 +12,10 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# API_URL is only needed at runtime (it's used in rewrites() which runs server-side),
-# so we don't need it as a build arg.
+# rewrites() in next.config.ts is evaluated at build time, so API_URL must be
+# available during `next build`, not just at runtime.
+ARG API_URL=http://crucible-api.internal:8080
+ENV API_URL=$API_URL
 RUN pnpm build
 
 # ── Runner ────────────────────────────────────────────────────────

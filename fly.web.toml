@@ -3,6 +3,8 @@ primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
+  [build.args]
+    API_URL = "http://crucible-api.internal:8080"
 
 [env]
   PORT = "3000"

@@ -25,8 +25,8 @@ import { z } from "zod/v4";
  */
 function getModel(): { model: LanguageModel; name: string } {
   return {
-    model: anthropic("claude-3-5-haiku-20241022"),
-    name: "anthropic/claude-3-5-haiku-20241022",
+    model: anthropic("claude-haiku-4-5-20251001"),
+    name: "anthropic/claude-haiku-4-5-20251001",
   };
 }
 
@@ -169,6 +169,7 @@ export async function POST(request: Request) {
               `[takeaways] Failed for paper ${paper.s2_id}:`,
               err instanceof Error ? err.message : err,
               err instanceof Error ? err.stack : "",
+              JSON.stringify(err, Object.getOwnPropertyNames(err instanceof Error ? err : {})),
             );
             controller.enqueue(
               encoder.encode(
