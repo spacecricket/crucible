@@ -8,6 +8,8 @@ Flow:
 4. Normalize, cache, and merge
 """
 
+import re
+import logging
 from datetime import datetime, timezone, timedelta
 
 from backend.services.semantic_scholar import SemanticScholarClient
@@ -15,8 +17,33 @@ from backend.services.paper_normalizer import normalize_paper
 from backend.services.job_store import JobStore
 from backend.db import upsert_papers, search_cached_papers
 
+logger = logging.getLogger(__name__)
+
 # Skip API call if cached results are newer than this
 CACHE_FRESHNESS_THRESHOLD = timedelta(hours=24)
+
+# Common question/filler words to strip before sending to S2 keyword search
+_QUESTION_WORDS = re.compile(
+    r"\b(is|are|does|do|did|was|were|will|would|can|could|should|has|have|had"
+    r"|what|why|how|when|where|which|who|whom|whose"
+    r"|the|a|an|of|for|in|on|at|to|and|or|not|be|been|being"
+    r"|bad|good|better|worse|high|low|more|less|much|many|some|any)\b",
+    re.IGNORECASE,
+)
+
+
+def _to_keywords(query: str) -> str:
+    """
+    Strip question/filler words so a natural-language question becomes
+    a keyword query suitable for Semantic Scholar's search endpoint.
+
+    e.g. "Is high LDL bad for the heart?" → "LDL heart"
+    """
+    cleaned = _QUESTION_WORDS.sub(" ", query)
+    # Remove punctuation, collapse whitespace
+    cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned if cleaned else query
 
 
 def _cache_is_fresh(papers: list[dict]) -> bool:
@@ -51,6 +78,7 @@ async def execute_search(
         # Step 1: Check local cache
         cached = search_cached_papers(query, limit=limit)
         cached_ids = {p["s2_id"] for p in cached}
+        logger.info("[search] cache hit: %d papers for query=%r", len(cached), query)
 
         # Step 2: If cache has enough fresh results, skip the API call
         if len(cached) >= limit and _cache_is_fresh(cached):
@@ -71,8 +99,12 @@ async def execute_search(
                 total=len(cached),
             )
 
-        response = await client.search_papers(query, limit=limit)
+        keywords = _to_keywords(query)
+        logger.info("[search] S2 query: %r (original: %r)", keywords, query)
+
+        response = await client.search_papers(keywords, limit=limit)
         raw_works = response.get("data") or []
+        logger.info("[search] S2 returned %d papers", len(raw_works))
 
         # Step 4: Normalize and deduplicate against cache
         new_papers = []
@@ -80,6 +112,8 @@ async def execute_search(
             normalized = normalize_paper(raw)
             if normalized and normalized["s2_id"] not in cached_ids:
                 new_papers.append(normalized)
+
+        logger.info("[search] %d new papers after dedup", len(new_papers))
 
         # Step 5: Cache new papers in Postgres
         if new_papers:
@@ -96,6 +130,7 @@ async def execute_search(
         )
 
     except Exception as e:
+        logger.exception("[search] job %s failed: %s", job_id, e)
         job_store.update_job(
             job_id,
             status="error",
