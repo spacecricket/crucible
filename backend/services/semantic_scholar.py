@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import httpx
 from upstash_ratelimit import Ratelimit
 
@@ -30,9 +31,11 @@ PAPER_FIELDS = ",".join([
 class SemanticScholarClient:
     def __init__(self, rate_limiter: Ratelimit):
         self.rate_limiter = rate_limiter
+        api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "")
         self.client = httpx.AsyncClient(
             base_url=BASE_URL,
             timeout=30.0,
+            headers={"x-api-key": api_key} if api_key else {},
         )
 
     async def _request(self, method: str, path: str, max_retries: int = 3, **kwargs) -> dict:

@@ -9,17 +9,18 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from upstash_redis import Redis
 
-from backend.services.openalex import OpenAlexClient
+from backend.services.semantic_scholar import SemanticScholarClient
 from backend.services.job_store import JobStore
 from backend.services.paper_search import execute_search
 from backend.services.graph_builder import build_citation_graph
 from backend.services.queue_publisher import QueuePublisher
+from backend.services.rate_limiter import create_rate_limiter
 from backend.db import get_paper_by_id, get_citation_graph, get_cached_takeaways, upsert_takeaway
 
 
 # --- App state initialized at startup ---
 
-openalex_client: OpenAlexClient | None = None
+s2_client: SemanticScholarClient | None = None
 job_store: JobStore | None = None
 queue: QueuePublisher | None = None
 
@@ -28,22 +29,22 @@ JOB_TIMEOUT_SECONDS = 120
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global openalex_client, job_store, queue
+    global s2_client, job_store, queue
 
     # Startup
     redis = Redis(
         url=os.environ["UPSTASH_REDIS_REST_URL"],
         token=os.environ["UPSTASH_REDIS_REST_TOKEN"],
     )
-    openalex_client = OpenAlexClient()
+    s2_client = SemanticScholarClient(rate_limiter=create_rate_limiter())
     job_store = JobStore(redis)
     queue = QueuePublisher()
 
     yield
 
     # Shutdown
-    if openalex_client:
-        await openalex_client.close()
+    if s2_client:
+        await s2_client.close()
 
 
 app = FastAPI(
@@ -106,7 +107,7 @@ async def execute_search_endpoint(req: ExecuteSearchRequest):
         query=req.query,
         limit=req.limit,
         job_id=req.job_id,
-        client=openalex_client,
+        client=s2_client,
         job_store=job_store,
     )
 
@@ -145,12 +146,12 @@ async def get_paper(paper_id: str):
     if paper:
         return paper
 
-    # Not cached — try fetching from OpenAlex
+    # Not cached — try fetching from Semantic Scholar
     try:
         from backend.services.paper_normalizer import normalize_paper
         from backend.db import upsert_papers
 
-        raw = await openalex_client.get_work(paper_id)
+        raw = await s2_client.get_paper(paper_id)
         normalized = normalize_paper(raw)
         if normalized:
             upsert_papers([normalized])
@@ -209,7 +210,7 @@ async def execute_graph_endpoint(req: BuildGraphRequest):
     await build_citation_graph(
         paper_id=req.paper_id,
         job_id=req.job_id,
-        client=openalex_client,
+        client=s2_client,
         job_store=job_store,
         max_hops=req.max_hops,
     )

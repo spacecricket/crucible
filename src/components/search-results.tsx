@@ -16,7 +16,7 @@ function StatusMessage({ status }: { status: string }) {
   const messages: Record<string, string> = {
     pending: "Queued...",
     searching_cache: "Checking cached papers...",
-    searching_api: "Searching OpenAlex...",
+    searching_api: "Searching Semantic Scholar...",
   };
 
   return (

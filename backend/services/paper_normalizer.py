@@ -140,5 +140,5 @@ def _reconstruct_abstract(inverted_index: dict | None) -> str | None:
     return " ".join(word for _, word in word_positions)
 
 
-# Default normalizer — currently OpenAlex
-normalize_paper = normalize_openalex_work
+# Default normalizer — Semantic Scholar
+normalize_paper = normalize_s2_paper

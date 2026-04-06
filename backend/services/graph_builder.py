@@ -6,7 +6,7 @@ then fetches references/citations for each of those (hop 1).
 Stores all edges in Postgres and all discovered papers in the papers cache.
 
 Flow:
-1. Fetch seed paper from OpenAlex (or cache)
+1. Fetch seed paper from Semantic Scholar (or cache)
 2. BFS hop 0: get references + citations of seed
 3. BFS hop 1: for each hop-0 paper, get its references + citations
 4. Store edges + papers
@@ -14,7 +14,7 @@ Flow:
 """
 
 import logging
-from backend.services.openalex import OpenAlexClient
+from backend.services.semantic_scholar import SemanticScholarClient
 from backend.services.paper_normalizer import normalize_paper
 from backend.services.job_store import JobStore
 from backend.db import upsert_papers, upsert_citations, get_citation_graph, get_paper_by_id
@@ -31,7 +31,7 @@ MAX_HOP1_EXPAND = 10
 async def build_citation_graph(
     paper_id: str,
     job_id: str,
-    client: OpenAlexClient,
+    client: SemanticScholarClient,
     job_store: JobStore,
     max_hops: int = 2,
 ):
@@ -45,8 +45,8 @@ async def build_citation_graph(
         # --- Fetch or look up the seed paper ---
         seed = get_paper_by_id(paper_id)
         if not seed:
-            # Not in cache yet — fetch from OpenAlex
-            raw = await client.get_work(paper_id)
+            # Not in cache yet — fetch from Semantic Scholar
+            raw = await client.get_paper(paper_id)
             normalized = normalize_paper(raw)
             if normalized:
                 upsert_papers([normalized])
@@ -125,11 +125,15 @@ async def _expand_paper(
     paper_id: str,
     seed_id: str,
     hop: int,
-    client: OpenAlexClient,
+    client: SemanticScholarClient,
 ) -> tuple[list[dict], list[dict]]:
     """
     Fetch references and citations for a single paper.
     Returns (edges, normalized_papers).
+
+    S2 response shapes:
+      references: {"data": [{"citedPaper": {...paper...}}, ...]}
+      citations:  {"data": [{"citingPaper": {...paper...}}, ...]}
     """
     edges = []
     papers = []
@@ -137,7 +141,10 @@ async def _expand_paper(
     # References: papers this paper cites (paper_id → ref_id)
     try:
         ref_response = await client.get_references(paper_id, limit=MAX_REFS_PER_PAPER)
-        for raw_work in ref_response.get("results", []):
+        for item in ref_response.get("data", []):
+            raw_work = item.get("citedPaper")
+            if not raw_work:
+                continue
             normalized = normalize_paper(raw_work)
             if normalized:
                 edges.append({
@@ -153,7 +160,10 @@ async def _expand_paper(
     # Citations: papers that cite this paper (citing_id → paper_id)
     try:
         cite_response = await client.get_citations(paper_id, limit=MAX_CITES_PER_PAPER)
-        for raw_work in cite_response.get("results", []):
+        for item in cite_response.get("data", []):
+            raw_work = item.get("citingPaper")
+            if not raw_work:
+                continue
             normalized = normalize_paper(raw_work)
             if normalized:
                 edges.append({

@@ -4,13 +4,13 @@ Paper search orchestration.
 Flow:
 1. Check Postgres cache for matching papers
 2. If cache has enough fresh results (< 24h old), return them directly
-3. Otherwise call OpenAlex API for fresh results
+3. Otherwise call Semantic Scholar API for fresh results
 4. Normalize, cache, and merge
 """
 
 from datetime import datetime, timezone, timedelta
 
-from backend.services.openalex import OpenAlexClient
+from backend.services.semantic_scholar import SemanticScholarClient
 from backend.services.paper_normalizer import normalize_paper
 from backend.services.job_store import JobStore
 from backend.db import upsert_papers, search_cached_papers
@@ -39,11 +39,11 @@ async def execute_search(
     query: str,
     limit: int,
     job_id: str,
-    client: OpenAlexClient,
+    client: SemanticScholarClient,
     job_store: JobStore,
 ):
     """
-    Run a paper search: check cache, call OpenAlex if needed, merge results, update job.
+    Run a paper search: check cache, call Semantic Scholar if needed, merge results, update job.
     """
     try:
         job_store.update_job(job_id, status="searching_cache")
@@ -62,7 +62,7 @@ async def execute_search(
             )
             return
 
-        # Step 3: Cache miss or stale — fetch from OpenAlex
+        # Step 3: Cache miss or stale — fetch from Semantic Scholar
         if cached:
             job_store.update_job(
                 job_id,
@@ -71,8 +71,8 @@ async def execute_search(
                 total=len(cached),
             )
 
-        response = await client.search_works(query, limit=limit)
-        raw_works = response.get("results") or []
+        response = await client.search_papers(query, limit=limit)
+        raw_works = response.get("data") or []
 
         # Step 4: Normalize and deduplicate against cache
         new_papers = []

@@ -12,9 +12,8 @@ def create_rate_limiter() -> Ratelimit:
     )
     return Ratelimit(
         redis=redis,
-        # S2 unauthenticated: 100 requests per 5 minutes
-        # We set 1 per 5 seconds (~12/min) to stay safely under the limit
-        limiter=SlidingWindow(max_requests=1, window=5),
+        # Authenticated S2 API key: 1 RPS
+        limiter=SlidingWindow(max_requests=1, window=1),
         prefix="crucible:s2",
     )
 
